@@ -72,4 +72,6 @@ type Stage struct {
 	Nests        []string            `json:"nests,omitempty"`
 	Filters      []Expr              `json:"filters,omitempty"`
 	InlineFields map[string]FieldDef `json:"inlineFields,omitempty"`
+	OrderBy      []string            `json:"orderBy,omitempty"`
+	Limit        *int                `json:"limit,omitempty"`
 }

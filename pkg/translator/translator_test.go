@@ -388,7 +388,7 @@ func TestTranslateMultipleDimensionsAndMeasures(t *testing.T) {
 				other_dim is 1
 			measure:
 				card_count is count()
-				limit_sum is sum(limit)
+				limit_sum is sum(credit_limit)
 		}
 	`
 	mallow, err := Parser.ParseString("", input)
@@ -429,7 +429,7 @@ func TestTranslateQueryMultipleFieldsWithoutCommas(t *testing.T) {
 				branch
 			measure:
 				card_count is count()
-				limit_sum is sum(limit)
+				limit_sum is sum(credit_limit)
 		}
 
 		query: top_banks is cc -> {
@@ -474,7 +474,7 @@ func TestTranslateCommaSeparatedFields(t *testing.T) {
 	input := `
 		source: cc is table('datamart.cc_records') {
 			dimension: issuing_bank, branch
-			measure: card_count is count(), limit_sum is sum(limit)
+			measure: card_count is count(), limit_sum is sum(credit_limit)
 		}
 		query: q is cc -> {
 			group_by: issuing_bank, branch

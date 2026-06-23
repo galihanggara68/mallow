@@ -1,6 +1,7 @@
 package compiler
 
 import (
+	"database/sql"
 	"fmt"
 	"strings"
 
@@ -13,6 +14,7 @@ type Dialect interface {
 	DatePart(part string, expr string) string
 	JSONArrayAgg(expr string) string
 	JSONObject(pairs []string) string // pairs: "key", "value", "key", "value"...
+	GetSchema(db *sql.DB, tableName string) (map[string]ir.DataType, error)
 }
 
 // Compiler translates IR to SQL.
@@ -296,6 +298,24 @@ func (c *sqlCompiler) compileStage(source ir.SourceDef, stage ir.Stage, isFirstS
 		sql += fmt.Sprintf(" GROUP BY %s", strings.Join(groupCols, ","))
 	}
 
+	if len(stage.OrderBy) > 0 {
+		var orderCols []string
+		for _, o := range stage.OrderBy {
+			parts := strings.Fields(o)
+			col := parts[0]
+			dir := ""
+			if len(parts) > 1 {
+				dir = " " + parts[1]
+			}
+			orderCols = append(orderCols, fmt.Sprintf("%s%s", c.dialect.QuoteIdentifier(col), dir))
+		}
+		sql += fmt.Sprintf(" ORDER BY %s", strings.Join(orderCols, ", "))
+	}
+
+	if stage.Limit != nil {
+		sql += fmt.Sprintf(" LIMIT %d", *stage.Limit)
+	}
+
 	return sql, nil
 }
 
@@ -484,6 +504,64 @@ func (d *DuckDBDialect) JSONObject(pairs []string) string {
 	return fmt.Sprintf("JSON_OBJECT(%s)", strings.Join(pairs, ", "))
 }
 
+func (d *DuckDBDialect) GetSchema(db *sql.DB, tableName string) (map[string]ir.DataType, error) {
+	actualTable := tableName
+	if !strings.Contains(actualTable, "(") && !strings.Contains(actualTable, ")") && !strings.HasPrefix(actualTable, "'") {
+		if strings.Contains(actualTable, "/") || strings.HasSuffix(actualTable, ".csv") || strings.HasSuffix(actualTable, ".parquet") {
+			actualTable = fmt.Sprintf("'%s'", actualTable)
+		}
+	}
+
+	rows, err := db.Query(fmt.Sprintf("DESCRIBE %s", actualTable))
+	if err != nil {
+		rows, err = db.Query(fmt.Sprintf("SELECT * FROM %s LIMIT 0", actualTable))
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		colTypes, err := rows.ColumnTypes()
+		if err != nil {
+			return nil, err
+		}
+		schemaMap := make(map[string]ir.DataType)
+		for _, col := range colTypes {
+			schemaMap[col.Name()] = duckdbTypeToMallowType(col.DatabaseTypeName())
+		}
+		return schemaMap, nil
+	}
+	defer rows.Close()
+
+	schemaMap := make(map[string]ir.DataType)
+	for rows.Next() {
+		var colName, colType, null, key, defVal, extra sql.NullString
+		if err := rows.Scan(&colName, &colType, &null, &key, &defVal, &extra); err != nil {
+			return nil, err
+		}
+		if colName.Valid && colType.Valid {
+			schemaMap[colName.String] = duckdbTypeToMallowType(colType.String)
+		}
+	}
+	return schemaMap, nil
+}
+
+func duckdbTypeToMallowType(dbType string) ir.DataType {
+	dbType = strings.ToLower(dbType)
+	switch {
+	case strings.Contains(dbType, "varchar") || strings.Contains(dbType, "text") || strings.Contains(dbType, "char") || strings.Contains(dbType, "blob"):
+		return ir.TypeString
+	case strings.Contains(dbType, "int") || strings.Contains(dbType, "hugeint") || strings.Contains(dbType, "numeric") || strings.Contains(dbType, "decimal") || strings.Contains(dbType, "double") || strings.Contains(dbType, "float") || strings.Contains(dbType, "real"):
+		return ir.TypeNumber
+	case strings.Contains(dbType, "bool"):
+		return ir.TypeBoolean
+	case dbType == "date":
+		return ir.TypeDate
+	case strings.Contains(dbType, "timestamp") || strings.Contains(dbType, "time"):
+		return ir.TypeTimestamp
+	default:
+		return ir.TypeUnknown
+	}
+}
+
 // PostgresDialect implements the Dialect interface for Postgres.
 type PostgresDialect struct {
 	DuckDBDialect
@@ -499,4 +577,55 @@ func (d *PostgresDialect) JSONArrayAgg(expr string) string {
 
 func (d *PostgresDialect) JSONObject(pairs []string) string {
 	return fmt.Sprintf("JSON_BUILD_OBJECT(%s)", strings.Join(pairs, ", "))
+}
+
+func (d *PostgresDialect) GetSchema(db *sql.DB, tableName string) (map[string]ir.DataType, error) {
+	parts := strings.Split(tableName, ".")
+	var schema, table string
+	if len(parts) == 2 {
+		schema = parts[0]
+		table = parts[1]
+	} else {
+		schema = "public"
+		table = tableName
+	}
+
+	query := `
+		SELECT column_name, data_type 
+		FROM information_schema.columns 
+		WHERE table_name = $1 AND table_schema = $2
+	`
+	rows, err := db.Query(query, table, schema)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	schemaMap := make(map[string]ir.DataType)
+	for rows.Next() {
+		var colName, dataType string
+		if err := rows.Scan(&colName, &dataType); err != nil {
+			return nil, err
+		}
+		schemaMap[colName] = postgresTypeToMallowType(dataType)
+	}
+	return schemaMap, nil
+}
+
+func postgresTypeToMallowType(pgType string) ir.DataType {
+	pgType = strings.ToLower(pgType)
+	switch {
+	case strings.Contains(pgType, "char") || strings.Contains(pgType, "text") || strings.Contains(pgType, "uuid"):
+		return ir.TypeString
+	case strings.Contains(pgType, "int") || strings.Contains(pgType, "numeric") || strings.Contains(pgType, "decimal") || strings.Contains(pgType, "double") || strings.Contains(pgType, "real") || strings.Contains(pgType, "float"):
+		return ir.TypeNumber
+	case strings.Contains(pgType, "bool"):
+		return ir.TypeBoolean
+	case pgType == "date":
+		return ir.TypeDate
+	case strings.Contains(pgType, "timestamp") || strings.Contains(pgType, "time"):
+		return ir.TypeTimestamp
+	default:
+		return ir.TypeUnknown
+	}
 }

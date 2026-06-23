@@ -1,3 +1,6 @@
+-include .env
+export
+
 .PHONY: all build test lint fmt fmt-check clean
 
 BINARY_NAME=mallow

@@ -716,3 +716,220 @@ func TestEngineE2ETransportationRevenue(t *testing.T) {
 		t.Logf("Successfully processed %d daily revenue records with nested details", count)
 	})
 }
+
+func TestEngineE2ESchemaIntrospection(t *testing.T) {
+	dbURL := os.Getenv("MALLOW_POSTGRES_URL")
+	if dbURL == "" {
+		t.Skip("MALLOW_POSTGRES_URL not set, skipping e2e schema introspection test")
+	}
+	db, err := sql.Open("postgres", dbURL)
+	if err != nil {
+		t.Fatalf("failed to connect to db: %v", err)
+	}
+	defer db.Close()
+
+	if err := db.Ping(); err != nil {
+		t.Skipf("skipping e2e schema introspection test, database not available: %v", err)
+	}
+
+	engine := mallow.New(&compiler.PostgresDialect{}, db)
+
+	// Source with no fields to trigger schema introspection.
+	sourceText := `
+		source: customers is table('datamart.customers')
+
+		query: intro_test is customers -> {
+			project: customer_id, name, email, region
+		}
+	`
+	session := engine.FromString(sourceText)
+
+	sqlStr, err := session.GetSQL("intro_test")
+	if err != nil {
+		t.Fatalf("failed to compile schema introspection query: %v", err)
+	}
+	t.Logf("Schema Introspection SQL: %s", sqlStr)
+
+	rows, err := session.Run(context.Background(), "intro_test")
+	if err != nil {
+		t.Fatalf("failed to run schema introspection query: %v", err)
+	}
+	defer rows.Close()
+
+	var count int
+	for rows.Next() {
+		var customerID int
+		var name, email string
+		var region sql.NullString
+		if err := rows.Scan(&customerID, &name, &email, &region); err != nil {
+			t.Fatalf("failed to scan schema introspection row: %v", err)
+		}
+		count++
+	}
+	if count == 0 {
+		t.Errorf("expected rows from schema introspection, got 0")
+	}
+}
+
+func TestEngineE2ELimit(t *testing.T) {
+	dbURL := os.Getenv("MALLOW_POSTGRES_URL")
+	if dbURL == "" {
+		t.Skip("MALLOW_POSTGRES_URL not set, skipping e2e limit test")
+	}
+	db, err := sql.Open("postgres", dbURL)
+	if err != nil {
+		t.Fatalf("failed to connect to db: %v", err)
+	}
+	defer db.Close()
+
+	if err := db.Ping(); err != nil {
+		t.Skipf("skipping e2e limit test, database not available: %v", err)
+	}
+
+	engine := mallow.New(&compiler.PostgresDialect{}, db)
+
+	sourceText := `
+		source: customers is table('datamart.customers') {
+			dimension: customer_id, name
+		}
+
+		query: limit_test is customers -> {
+			project: customer_id, name
+			limit: 3
+		}
+	`
+	session := engine.FromString(sourceText)
+
+	sqlStr, err := session.GetSQL("limit_test")
+	if err != nil {
+		t.Fatalf("failed to compile limit query: %v", err)
+	}
+	t.Logf("Limit SQL: %s", sqlStr)
+
+	rows, err := session.Run(context.Background(), "limit_test")
+	if err != nil {
+		t.Fatalf("failed to run limit query: %v", err)
+	}
+	defer rows.Close()
+
+	var count int
+	for rows.Next() {
+		var customerID int
+		var name string
+		if err := rows.Scan(&customerID, &name); err != nil {
+			t.Fatalf("failed to scan limit row: %v", err)
+		}
+		count++
+	}
+	if count != 3 {
+		t.Errorf("expected exactly 3 rows, got %d", count)
+	}
+}
+
+func TestEngineE2EOrder(t *testing.T) {
+	dbURL := os.Getenv("MALLOW_POSTGRES_URL")
+	if dbURL == "" {
+		t.Skip("MALLOW_POSTGRES_URL not set, skipping e2e order test")
+	}
+	db, err := sql.Open("postgres", dbURL)
+	if err != nil {
+		t.Fatalf("failed to connect to db: %v", err)
+	}
+	defer db.Close()
+
+	if err := db.Ping(); err != nil {
+		t.Skipf("skipping e2e order test, database not available: %v", err)
+	}
+
+	engine := mallow.New(&compiler.PostgresDialect{}, db)
+
+	// Test ASC ordering
+	sourceTextAsc := `
+		source: customers is table('datamart.customers') {
+			dimension: customer_id, name
+		}
+
+		query: order_asc_test is customers -> {
+			project: customer_id, name
+			order_by: customer_id asc
+		}
+	`
+	sessionAsc := engine.FromString(sourceTextAsc)
+
+	sqlStrAsc, err := sessionAsc.GetSQL("order_asc_test")
+	if err != nil {
+		t.Fatalf("failed to compile order asc query: %v", err)
+	}
+	t.Logf("Order ASC SQL: %s", sqlStrAsc)
+
+	rowsAsc, err := sessionAsc.Run(context.Background(), "order_asc_test")
+	if err != nil {
+		t.Fatalf("failed to run order asc query: %v", err)
+	}
+	defer rowsAsc.Close()
+
+	var prevID int = -1
+	var countAsc int
+	for rowsAsc.Next() {
+		var customerID int
+		var name string
+		if err := rowsAsc.Scan(&customerID, &name); err != nil {
+			t.Fatalf("failed to scan order asc row: %v", err)
+		}
+		if prevID != -1 && customerID <= prevID {
+			t.Errorf("expected ascending order, but got ID %d after %d", customerID, prevID)
+		}
+		prevID = customerID
+		countAsc++
+	}
+	if countAsc == 0 {
+		t.Errorf("expected rows, got 0")
+	}
+
+	// Test DESC ordering
+	sourceTextDesc := `
+		source: customers is table('datamart.customers') {
+			dimension: customer_id, name
+		}
+
+		query: order_desc_test is customers -> {
+			project: customer_id, name
+			order_by: customer_id desc
+		}
+	`
+	sessionDesc := engine.FromString(sourceTextDesc)
+
+	sqlStrDesc, err := sessionDesc.GetSQL("order_desc_test")
+	if err != nil {
+		t.Fatalf("failed to compile order desc query: %v", err)
+	}
+	t.Logf("Order DESC SQL: %s", sqlStrDesc)
+
+	rowsDesc, err := sessionDesc.Run(context.Background(), "order_desc_test")
+	if err != nil {
+		t.Fatalf("failed to run order desc query: %v", err)
+	}
+	defer rowsDesc.Close()
+
+	prevID = -1
+	var countDesc int
+	for rowsDesc.Next() {
+		var customerID int
+		var name string
+		if err := rowsDesc.Scan(&customerID, &name); err != nil {
+			t.Fatalf("failed to scan order desc row: %v", err)
+		}
+		if prevID != -1 && customerID >= prevID {
+			t.Errorf("expected descending order, but got ID %d after %d", customerID, prevID)
+		}
+		prevID = customerID
+		countDesc++
+	}
+	if countDesc == 0 {
+		t.Errorf("expected rows, got 0")
+	}
+	if countAsc != countDesc {
+		t.Errorf("row counts mismatch between asc (%d) and desc (%d)", countAsc, countDesc)
+	}
+}
+

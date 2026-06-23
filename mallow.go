@@ -3,8 +3,10 @@ package mallow
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/galihanggara68/mallow/pkg/compiler"
 	"github.com/galihanggara68/mallow/pkg/ir"
@@ -71,6 +73,9 @@ func (s *Session) GetSQL(queryName string) (string, error) {
 	}
 
 	tr := translator.NewTranslator()
+	if s.engine != nil && s.engine.db != nil && s.engine.dialect != nil {
+		tr.SetDB(s.engine.db, s.engine.dialect)
+	}
 	sources, queries, err := tr.Translate(parsed)
 	if err != nil {
 		return "", err
@@ -125,4 +130,82 @@ func (s *Session) Run(ctx context.Context, queryName string) (*sql.Rows, error) 
 	}
 
 	return s.engine.db.QueryContext(ctx, sqlStr)
+}
+
+// RunAndMap executes the query and maps the rows to Go-native maps/slices.
+func (s *Session) RunAndMap(ctx context.Context, queryName string) ([]map[string]any, error) {
+	rows, err := s.Run(ctx, queryName)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return MapRows(rows)
+}
+
+// MapRows scans sql.Rows and maps nested JSON columns back to Go maps/slices.
+func MapRows(rows *sql.Rows) ([]map[string]any, error) {
+	cols, err := rows.Columns()
+	if err != nil {
+		return nil, err
+	}
+
+	var results []map[string]any
+
+	for rows.Next() {
+		values := make([]any, len(cols))
+		valuePtrs := make([]any, len(cols))
+		for i := range values {
+			valuePtrs[i] = &values[i]
+		}
+
+		if err := rows.Scan(valuePtrs...); err != nil {
+			return nil, err
+		}
+
+		rowMap := make(map[string]any)
+		for i, colName := range cols {
+			val := values[i]
+			if val == nil {
+				rowMap[colName] = nil
+				continue
+			}
+
+			switch v := val.(type) {
+			case []byte:
+				strVal := string(v)
+				if isJSONString(strVal) {
+					var parsedVal any
+					if err := json.Unmarshal(v, &parsedVal); err == nil {
+						rowMap[colName] = parsedVal
+						continue
+					}
+				}
+				rowMap[colName] = strVal
+			case string:
+				if isJSONString(v) {
+					var parsedVal any
+					if err := json.Unmarshal([]byte(v), &parsedVal); err == nil {
+						rowMap[colName] = parsedVal
+						continue
+					}
+				}
+				rowMap[colName] = v
+			default:
+				rowMap[colName] = v
+			}
+		}
+		results = append(results, rowMap)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return results, nil
+}
+
+func isJSONString(s string) bool {
+	s = strings.TrimSpace(s)
+	return (strings.HasPrefix(s, "{") && strings.HasSuffix(s, "}")) ||
+		(strings.HasPrefix(s, "[") && strings.HasSuffix(s, "]"))
 }

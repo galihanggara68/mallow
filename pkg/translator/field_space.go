@@ -1,7 +1,9 @@
 package translator
 
 import (
+	"database/sql"
 	"fmt"
+	"strings"
 
 	"github.com/galihanggara68/mallow/pkg/ir"
 )
@@ -71,15 +73,26 @@ func (g *GlobalFieldSpace) GetSource(name string) (ir.SourceDef, bool) {
 	return s, ok
 }
 
+type SchemaIntrospector interface {
+	GetSchema(db *sql.DB, tableName string) (map[string]ir.DataType, error)
+}
+
 // Translator converts AST to IR.
 type Translator struct {
-	global *GlobalFieldSpace
+	global  *GlobalFieldSpace
+	db      *sql.DB
+	dialect SchemaIntrospector
 }
 
 func NewTranslator() *Translator {
 	return &Translator{
 		global: NewGlobalFieldSpace(),
 	}
+}
+
+func (t *Translator) SetDB(db *sql.DB, dialect SchemaIntrospector) {
+	t.db = db
+	t.dialect = dialect
 }
 
 func (t *Translator) Translate(m *Mallow) ([]ir.SourceDef, []ir.Query, error) {
@@ -279,6 +292,42 @@ func (t *Translator) translateStageItems(items []*QueryItem, fs FieldSpace) (ir.
 			}
 		}
 	}
+
+	for _, item := range items {
+		if len(item.OrderBy) > 0 {
+			for _, o := range item.OrderBy {
+				cleanName := stripBackticks(o.Name)
+				_, inFS := fs.Lookup(cleanName)
+				_, inInline := stage.InlineFields[cleanName]
+				inDims := false
+				for _, d := range stage.Dimensions {
+					if d == cleanName {
+						inDims = true
+						break
+					}
+				}
+				inMeas := false
+				for _, m := range stage.Measures {
+					if m == cleanName {
+						inMeas = true
+						break
+					}
+				}
+				if !inFS && !inInline && !inDims && !inMeas {
+					return ir.Stage{}, fmt.Errorf("order_by field not found: %s", cleanName)
+				}
+				orderStr := cleanName
+				if o.Direction != "" {
+					orderStr += " " + strings.ToUpper(o.Direction)
+				}
+				stage.OrderBy = append(stage.OrderBy, orderStr)
+			}
+		}
+		if item.Limit != nil {
+			stage.Limit = item.Limit
+		}
+	}
+
 	return stage, nil
 }
 
@@ -364,6 +413,21 @@ func (t *Translator) translateSource(decl *SourceDeclaration) (ir.SourceDef, err
 						return ir.SourceDef{}, err
 					}
 				}
+			}
+		}
+	}
+
+	// If fields are omitted, dynamically inject ir.FieldDef based on the database schema.
+	if (decl.Body == nil || len(src.Fields) == 0) && decl.Def.Table != nil && t.db != nil && t.dialect != nil {
+		schema, err := t.dialect.GetSchema(t.db, *decl.Def.Table)
+		if err != nil {
+			return ir.SourceDef{}, fmt.Errorf("schema introspection failed for table %s: %w", *decl.Def.Table, err)
+		}
+		for colName, colType := range schema {
+			src.Fields[colName] = ir.FieldDef{
+				Kind: ir.KindDimension,
+				Name: colName,
+				Type: colType,
 			}
 		}
 	}

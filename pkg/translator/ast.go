@@ -7,7 +7,7 @@ import (
 
 var (
 	mallowLexer = lexer.MustSimple([]lexer.SimpleRule{
-		{Name: "Keyword", Pattern: `\b(source|query|run|is|table|dimension|measure|join_one|join_many|on|project|aggregate|group_by|nest|not|where)\b`},
+		{Name: "Keyword", Pattern: `\b(source|query|run|is|table|dimension|measure|join_one|join_many|on|project|aggregate|group_by|nest|not|where|order_by|limit)\b`},
 		{Name: "Ident", Pattern: "[a-zA-Z_][a-zA-Z0-9_]*|`[^`]*`"},
 		{Name: "String", Pattern: `'[^']*'|"[^"]*"`},
 		{Name: "Number", Pattern: `\d+(\.\d+)?`},
@@ -150,11 +150,18 @@ type QueryBody struct {
 }
 
 type QueryItem struct {
-	Project   []*Dimension `parser:"'project' ':' @@ ( ','? @@ )*"`
-	Aggregate []*Measure   `parser:"| 'aggregate' ':' @@ ( ','? @@ )*"`
-	GroupBy   []*Dimension `parser:"| 'group_by' ':' @@ ( ','? @@ )*"`
-	Nest      []*Nest      `parser:"| 'nest' ':' @@ ( ','? @@ )*"`
-	Where     []*Expr      `parser:"| 'where' ':' @@ ( ','? @@ )*"`
+	Project   []*Dimension   `parser:"'project' ':' @@ ( ','? @@ )*"`
+	Aggregate []*Measure     `parser:"| 'aggregate' ':' @@ ( ','? @@ )*"`
+	GroupBy   []*Dimension   `parser:"| 'group_by' ':' @@ ( ','? @@ )*"`
+	Nest      []*Nest        `parser:"| 'nest' ':' @@ ( ','? @@ )*"`
+	Where     []*Expr        `parser:"| 'where' ':' @@ ( ','? @@ )*"`
+	OrderBy   []*OrderByItem `parser:"| 'order_by' ':' @@ ( ','? @@ )*"`
+	Limit     *int           `parser:"| 'limit' ':' @Number"`
+}
+
+type OrderByItem struct {
+	Name      string `parser:"@Ident"`
+	Direction string `parser:"[ @('asc' | 'desc' | 'ASC' | 'DESC') ]"`
 }
 
 type Nest struct {
