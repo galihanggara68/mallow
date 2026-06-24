@@ -15,6 +15,7 @@ type Dialect interface {
 	JSONArrayAgg(expr string) string
 	JSONObject(pairs []string) string // pairs: "key", "value", "key", "value"...
 	GetSchema(db *sql.DB, tableName string) (map[string]ir.DataType, error)
+	TypeCast(expr string, castType ir.DataType) string
 }
 
 // Compiler translates IR to SQL.
@@ -468,6 +469,12 @@ func (c *sqlCompiler) compileExpr(expr ir.Expr, sourceAlias string, useBaseAlias
 			args = append(args, compiledArg)
 		}
 		return blueprint(c.dialect, args)
+	case ir.CastExpr:
+		child, err := c.compileExpr(e.Expr, sourceAlias, useBaseAlias)
+		if err != nil {
+			return "", err
+		}
+		return c.dialect.TypeCast(child, e.Type), nil
 	case *ir.BinaryExpr:
 		return c.compileExpr(*e, sourceAlias, useBaseAlias)
 	case *ir.UnaryExpr:
@@ -477,6 +484,8 @@ func (c *sqlCompiler) compileExpr(expr ir.Expr, sourceAlias string, useBaseAlias
 	case *ir.FieldReference:
 		return c.compileExpr(*e, sourceAlias, useBaseAlias)
 	case *ir.CallExpr:
+		return c.compileExpr(*e, sourceAlias, useBaseAlias)
+	case *ir.CastExpr:
 		return c.compileExpr(*e, sourceAlias, useBaseAlias)
 	default:
 		return "", fmt.Errorf("unsupported expression type: %T", expr)
@@ -502,6 +511,25 @@ func (d *DuckDBDialect) JSONArrayAgg(expr string) string {
 
 func (d *DuckDBDialect) JSONObject(pairs []string) string {
 	return fmt.Sprintf("JSON_OBJECT(%s)", strings.Join(pairs, ", "))
+}
+
+func (d *DuckDBDialect) TypeCast(expr string, castType ir.DataType) string {
+	sqlType := "VARCHAR"
+	switch castType {
+	case ir.TypeNumber:
+		sqlType = "DOUBLE"
+	case ir.TypeString:
+		sqlType = "VARCHAR"
+	case ir.TypeBoolean:
+		sqlType = "BOOLEAN"
+	case ir.TypeTimestamp:
+		sqlType = "TIMESTAMP"
+	case ir.TypeTimestampz:
+		sqlType = "TIMESTAMP WITH TIME ZONE"
+	case ir.TypeDate:
+		sqlType = "DATE"
+	}
+	return fmt.Sprintf("CAST(%s AS %s)", expr, sqlType)
 }
 
 func (d *DuckDBDialect) GetSchema(db *sql.DB, tableName string) (map[string]ir.DataType, error) {
@@ -577,6 +605,25 @@ func (d *PostgresDialect) JSONArrayAgg(expr string) string {
 
 func (d *PostgresDialect) JSONObject(pairs []string) string {
 	return fmt.Sprintf("JSON_BUILD_OBJECT(%s)", strings.Join(pairs, ", "))
+}
+
+func (d *PostgresDialect) TypeCast(expr string, castType ir.DataType) string {
+	sqlType := "TEXT"
+	switch castType {
+	case ir.TypeNumber:
+		sqlType = "DOUBLE PRECISION"
+	case ir.TypeString:
+		sqlType = "TEXT"
+	case ir.TypeBoolean:
+		sqlType = "BOOLEAN"
+	case ir.TypeTimestamp:
+		sqlType = "TIMESTAMP"
+	case ir.TypeTimestampz:
+		sqlType = "TIMESTAMPTZ"
+	case ir.TypeDate:
+		sqlType = "DATE"
+	}
+	return fmt.Sprintf("CAST(%s AS %s)", expr, sqlType)
 }
 
 func (d *PostgresDialect) GetSchema(db *sql.DB, tableName string) (map[string]ir.DataType, error) {

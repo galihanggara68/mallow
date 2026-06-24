@@ -542,3 +542,42 @@ func TestTranslateQueryInlineExpressions(t *testing.T) {
 		t.Error("Missing inline measure 'total_limit'")
 	}
 }
+
+func TestTranslateTypeCast(t *testing.T) {
+	input := `source: orders is table('db.orders') {
+		dimension: price_str is price::string
+		dimension: price_cast is cast(price as string)
+	}`
+	mallow, err := Parser.ParseString("", input)
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+
+	tr := NewTranslator()
+	sources, _, err := tr.Translate(mallow)
+	if err != nil {
+		t.Fatalf("Translate failed: %v", err)
+	}
+
+	orders := sources[0]
+	
+	// Check :: operator
+	priceStr := orders.Fields["price_str"]
+	ce, ok := priceStr.Expr.(ir.CastExpr)
+	if !ok {
+		t.Fatalf("Expected CastExpr, got %T", priceStr.Expr)
+	}
+	if ce.Type != ir.TypeString {
+		t.Errorf("Expected TypeString, got %v", ce.Type)
+	}
+
+	// Check cast() function
+	priceCast := orders.Fields["price_cast"]
+	ce2, ok := priceCast.Expr.(ir.CastExpr)
+	if !ok {
+		t.Fatalf("Expected CastExpr, got %T", priceCast.Expr)
+	}
+	if ce2.Type != ir.TypeString {
+		t.Errorf("Expected TypeString, got %v", ce2.Type)
+	}
+}

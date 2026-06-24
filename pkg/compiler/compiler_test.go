@@ -520,3 +520,44 @@ func TestCompileErrorWrongKind(t *testing.T) {
 		t.Error("expected error for field kind mismatch, got nil")
 	}
 }
+
+func TestCompileCastExpr(t *testing.T) {
+	dialect := &DuckDBDialect{}
+	comp := NewCompiler(dialect)
+
+	source := ir.SourceDef{
+		Name: "orders",
+		Fields: map[string]ir.FieldDef{
+			"price": {Kind: ir.KindDimension, Name: "price"},
+		},
+		PrimarySource: ir.PrimarySource{TablePath: "orders"},
+	}
+
+	query := ir.Query{
+		Stages: []ir.Stage{
+			{
+				Dimensions: []string{"price_str"},
+				InlineFields: map[string]ir.FieldDef{
+					"price_str": {
+						Kind: ir.KindDimension,
+						Name: "price_str",
+						Expr: ir.CastExpr{
+							Expr: ir.FieldReference{Path: []string{"price"}},
+							Type: ir.TypeString,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	expected := "SELECT CAST(\"price\" AS VARCHAR) AS \"price_str\" FROM \"orders\" AS t0 GROUP BY 1"
+	got, err := comp.Compile(source, query)
+	if err != nil {
+		t.Fatalf("Compile failed: %v", err)
+	}
+
+	if got != expected {
+		t.Errorf("Compile() = %v, want %v", got, expected)
+	}
+}

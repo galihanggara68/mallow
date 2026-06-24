@@ -9,6 +9,7 @@ const (
 	TypeBoolean   DataType = "boolean"
 	TypeDate      DataType = "date"
 	TypeTimestamp DataType = "timestamp"
+	TypeTimestampz DataType = "timestampz"
 	TypeUnknown   DataType = "unknown"
 )
 

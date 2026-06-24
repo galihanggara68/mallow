@@ -523,7 +523,7 @@ func (t *Translator) translateMultiplication(m *Multiplication) (ir.Expr, error)
 }
 
 func (t *Translator) translateUnary(u *Unary) (ir.Expr, error) {
-	expr, err := t.translatePrimary(u.Primary)
+	expr, err := t.translateCast(u.Cast)
 	if err != nil {
 		return nil, err
 	}
@@ -539,12 +539,36 @@ func (t *Translator) translateUnary(u *Unary) (ir.Expr, error) {
 	return expr, nil
 }
 
+func (t *Translator) translateCast(c *Cast) (ir.Expr, error) {
+	expr, err := t.translatePrimary(c.Primary)
+	if err != nil {
+		return nil, err
+	}
+	for _, castType := range c.Casts {
+		expr = ir.CastExpr{
+			Expr: expr,
+			Type: ir.DataType(castType),
+		}
+	}
+	return expr, nil
+}
+
 func (t *Translator) translatePrimary(p *Primary) (ir.Expr, error) {
 	if p.Number != nil {
 		return ir.Literal{Value: *p.Number, Type: ir.TypeNumber}, nil
 	}
 	if p.String != nil {
 		return ir.Literal{Value: *p.String, Type: ir.TypeString}, nil
+	}
+	if p.CastFunc != nil {
+		expr, err := t.translateExpr(p.CastFunc.Expr)
+		if err != nil {
+			return nil, err
+		}
+		return ir.CastExpr{
+			Expr: expr,
+			Type: ir.DataType(p.CastFunc.Type),
+		}, nil
 	}
 	if p.Field != nil {
 		var cleanPath []string

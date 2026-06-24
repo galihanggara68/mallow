@@ -933,3 +933,62 @@ func TestEngineE2EOrder(t *testing.T) {
 	}
 }
 
+func TestEngineE2ETypeCast(t *testing.T) {
+	dbURL := os.Getenv("MALLOW_POSTGRES_URL")
+	if dbURL == "" {
+		t.Skip("MALLOW_POSTGRES_URL not set, skipping e2e cast test")
+	}
+	db, err := sql.Open("postgres", dbURL)
+	if err != nil {
+		t.Fatalf("failed to connect to db: %v", err)
+	}
+	defer db.Close()
+
+	if err := db.Ping(); err != nil {
+		t.Skipf("skipping e2e cast test, database not available: %v", err)
+	}
+
+	engine := mallow.New(&compiler.PostgresDialect{}, db)
+
+	sourceText := `
+		source: customers is table('datamart.customers') {
+			dimension: id is customer_id::string
+			dimension: id2 is cast(customer_id as string)
+		}
+
+		query: cast_test is customers -> {
+			project: id, id2
+			limit: 10
+		}
+	`
+	session := engine.FromString(sourceText)
+
+	sqlStr, err := session.GetSQL("cast_test")
+	if err != nil {
+		t.Fatalf("failed to compile cast_test: %v", err)
+	}
+	t.Logf("Cast Test SQL: %s", sqlStr)
+
+	rows, err := session.Run(context.Background(), "cast_test")
+	if err != nil {
+		t.Fatalf("failed to run cast_test: %v", err)
+	}
+	defer rows.Close()
+
+	var count int
+	for rows.Next() {
+		var id string
+		var id2 string
+		if err := rows.Scan(&id, &id2); err != nil {
+			t.Fatalf("failed to scan row: %v", err)
+		}
+		if id != id2 {
+			t.Errorf("Expected id %s to match id2 %s", id, id2)
+		}
+		count++
+	}
+
+	if count == 0 {
+		t.Logf("Query ran successfully, but returned 0 rows.")
+	}
+}

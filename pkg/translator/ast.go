@@ -7,12 +7,12 @@ import (
 
 var (
 	mallowLexer = lexer.MustSimple([]lexer.SimpleRule{
-		{Name: "Keyword", Pattern: `\b(source|query|run|is|table|dimension|measure|join_one|join_many|on|project|aggregate|group_by|nest|not|where|order_by|limit)\b`},
+		{Name: "Keyword", Pattern: `\b(source|query|run|is|table|dimension|measure|join_one|join_many|on|project|aggregate|group_by|nest|not|where|order_by|limit|cast|as|number|string|boolean|timestampz|timestamp|date)\b`},
 		{Name: "Ident", Pattern: "[a-zA-Z_][a-zA-Z0-9_]*|`[^`]*`"},
 		{Name: "String", Pattern: `'[^']*'|"[^"]*"`},
 		{Name: "Number", Pattern: `\d+(\.\d+)?`},
 		{Name: "Arrow", Pattern: `->`},
-		{Name: "Punct", Pattern: `[-+*/%,:;().\[\]{}]|[=!<>]=?`},
+		{Name: "Punct", Pattern: `[-+*/%,;().\[\]{}]|::|:|[=!<>]=?`},
 		{Name: "Whitespace", Pattern: `\s+`},
 	})
 
@@ -114,16 +114,27 @@ type OpMultiplication struct {
 }
 
 type Unary struct {
-	Op      string   `parser:"[ @('-' | 'not') ]"`
+	Op   string `parser:"[ @('-' | 'not') ]"`
+	Cast *Cast  `parser:"@@"`
+}
+
+type Cast struct {
 	Primary *Primary `parser:"@@"`
+	Casts   []string `parser:"( '::' @('number' | 'string' | 'boolean' | 'timestamp' | 'timestampz' | 'date') )*"`
 }
 
 type Primary struct {
-	Number  *float64 `parser:"  @Number"`
-	String  *string  `parser:"| @String"`
-	SubExpr *Expr    `parser:"| '(' @@ ')'"`
-	Call    *Call    `parser:"| @@"`
-	Field   *Path    `parser:"| @@"`
+	Number   *float64  `parser:"  @Number"`
+	String   *string   `parser:"| @String"`
+	CastFunc *CastFunc `parser:"| @@"`
+	SubExpr  *Expr     `parser:"| '(' @@ ')'"`
+	Call     *Call     `parser:"| @@"`
+	Field    *Path     `parser:"| @@"`
+}
+
+type CastFunc struct {
+	Expr *Expr  `parser:"'cast' '(' @@"`
+	Type string `parser:"'as' @('number' | 'string' | 'boolean' | 'timestamp' | 'timestampz' | 'date') ')'"`
 }
 
 type Path struct {

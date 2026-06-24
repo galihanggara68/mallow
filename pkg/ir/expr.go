@@ -70,3 +70,11 @@ type CallExpr struct {
 }
 
 func (e CallExpr) isExpr() {}
+
+// CastExpr represents a type casting expression.
+type CastExpr struct {
+	Expr Expr     `json:"expr"`
+	Type DataType `json:"type"`
+}
+
+func (e CastExpr) isExpr() {}
