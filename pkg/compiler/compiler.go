@@ -92,10 +92,12 @@ func (c *sqlCompiler) compileStage(source ir.SourceDef, stage ir.Stage, isFirstS
 			}
 			// For subsequent stages, we allow it
 			selectCols = append(selectCols, c.dialect.QuoteIdentifier(dimName))
-			groupCols = append(groupCols, fmt.Sprintf("%d", len(selectCols)))
+			if !stage.IsProject {
+				groupCols = append(groupCols, fmt.Sprintf("%d", len(selectCols)))
+			}
 			continue
 		}
-		if field.Kind != ir.KindDimension && field.Kind != ir.KindJoin && field.Kind != ir.KindJoinOne && field.Kind != ir.KindJoinMany { // Join fields can be dimensions too if they are just refs
+		if !stage.IsProject && field.Kind != ir.KindDimension && field.Kind != ir.KindJoin && field.Kind != ir.KindJoinOne && field.Kind != ir.KindJoinMany { // Join fields can be dimensions too if they are just refs
 			return "", fmt.Errorf("field is not a dimension: %s", dimName)
 		}
 
@@ -116,7 +118,9 @@ func (c *sqlCompiler) compileStage(source ir.SourceDef, stage ir.Stage, isFirstS
 		} else {
 			selectCols = append(selectCols, expr)
 		}
-		groupCols = append(groupCols, fmt.Sprintf("%d", len(selectCols)))
+		if !stage.IsProject {
+			groupCols = append(groupCols, fmt.Sprintf("%d", len(selectCols)))
+		}
 	}
 
 	// Handle Measures
@@ -638,8 +642,8 @@ func (d *PostgresDialect) GetSchema(db *sql.DB, tableName string) (map[string]ir
 	}
 
 	query := `
-		SELECT column_name, data_type 
-		FROM information_schema.columns 
+		SELECT column_name, data_type
+		FROM information_schema.columns
 		WHERE table_name = $1 AND table_schema = $2
 	`
 	rows, err := db.Query(query, table, schema)

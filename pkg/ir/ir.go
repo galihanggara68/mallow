@@ -4,13 +4,13 @@ package ir
 type DataType string
 
 const (
-	TypeString    DataType = "string"
-	TypeNumber    DataType = "number"
-	TypeBoolean   DataType = "boolean"
-	TypeDate      DataType = "date"
-	TypeTimestamp DataType = "timestamp"
+	TypeString     DataType = "string"
+	TypeNumber     DataType = "number"
+	TypeBoolean    DataType = "boolean"
+	TypeDate       DataType = "date"
+	TypeTimestamp  DataType = "timestamp"
 	TypeTimestampz DataType = "timestampz"
-	TypeUnknown   DataType = "unknown"
+	TypeUnknown    DataType = "unknown"
 )
 
 // FieldKind represents the kind of field (dimension, measure, join, nest).
@@ -68,6 +68,7 @@ type Query struct {
 
 // Stage represents a single reduce or project operation in a query.
 type Stage struct {
+	IsProject    bool                `json:"isProject,omitempty"`
 	Dimensions   []string            `json:"dimensions"`
 	Measures     []string            `json:"measures"`
 	Nests        []string            `json:"nests,omitempty"`

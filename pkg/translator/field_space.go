@@ -164,8 +164,12 @@ func (t *Translator) translateStageItems(items []*QueryItem, fs FieldSpace) (ir.
 	stage := ir.Stage{
 		InlineFields: make(map[string]ir.FieldDef),
 	}
+	var hasGroupByOrAggregate bool
+	var hasProject bool
+
 	for _, item := range items {
 		if len(item.GroupBy) > 0 {
+			hasGroupByOrAggregate = true
 			for _, dim := range item.GroupBy {
 				cleanName := stripBackticks(dim.Name)
 				if dim.Expr != nil {
@@ -192,6 +196,7 @@ func (t *Translator) translateStageItems(items []*QueryItem, fs FieldSpace) (ir.
 			}
 		}
 		if len(item.Aggregate) > 0 {
+			hasGroupByOrAggregate = true
 			for _, meas := range item.Aggregate {
 				cleanName := stripBackticks(meas.Name)
 				if meas.Expr != nil {
@@ -217,6 +222,7 @@ func (t *Translator) translateStageItems(items []*QueryItem, fs FieldSpace) (ir.
 			}
 		}
 		if len(item.Project) > 0 {
+			hasProject = true
 			for _, dim := range item.Project {
 				cleanName := stripBackticks(dim.Name)
 				if dim.Expr != nil {
@@ -238,6 +244,7 @@ func (t *Translator) translateStageItems(items []*QueryItem, fs FieldSpace) (ir.
 			}
 		}
 		if len(item.Nest) > 0 {
+			hasGroupByOrAggregate = true
 			for _, nest := range item.Nest {
 				// Translate nested query
 				cleanNestName := stripBackticks(nest.Name)
@@ -292,6 +299,8 @@ func (t *Translator) translateStageItems(items []*QueryItem, fs FieldSpace) (ir.
 			}
 		}
 	}
+
+	stage.IsProject = hasProject && !hasGroupByOrAggregate
 
 	for _, item := range items {
 		if len(item.OrderBy) > 0 {
