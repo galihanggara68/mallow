@@ -118,6 +118,55 @@ func (s *Session) GetSQL(queryName string) (string, error) {
 	return comp.Compile(*targetSource, *targetQuery)
 }
 
+// FieldSchema represents a single field's schema information.
+type FieldSchema struct {
+	Name string
+	Type ir.DataType
+}
+
+// GetSchema returns the schema (field names and types) for the specified source.
+func (s *Session) GetSchema(sourceName string) ([]FieldSchema, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+
+	parsed, err := translator.Parser.ParseString("", s.content)
+	if err != nil {
+		return nil, err
+	}
+
+	tr := translator.NewTranslator()
+	if s.engine != nil && s.engine.db != nil && s.engine.dialect != nil {
+		tr.SetDB(s.engine.db, s.engine.dialect)
+	}
+	sources, _, err := tr.Translate(parsed)
+	if err != nil {
+		return nil, err
+	}
+
+	var targetSource *ir.SourceDef
+	for i := range sources {
+		if sources[i].Name == sourceName {
+			targetSource = &sources[i]
+			break
+		}
+	}
+
+	if targetSource == nil {
+		return nil, fmt.Errorf("source not found: %s", sourceName)
+	}
+
+	schema := make([]FieldSchema, 0, len(targetSource.Fields))
+	for _, f := range targetSource.Fields {
+		schema = append(schema, FieldSchema{
+			Name: f.Name,
+			Type: f.Type,
+		})
+	}
+
+	return schema, nil
+}
+
 // Run executes the specified query against the configured database.
 func (s *Session) Run(ctx context.Context, queryName string) (*sql.Rows, error) {
 	sqlStr, err := s.GetSQL(queryName)

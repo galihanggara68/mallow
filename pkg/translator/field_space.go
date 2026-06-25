@@ -389,6 +389,9 @@ func (t *Translator) translateSource(decl *SourceDeclaration) (ir.SourceDef, err
 							return ir.SourceDef{}, err
 						}
 						f.Expr = expr
+						f.Type = inferTypeFromExpr(expr)
+					} else {
+						f.Type = ir.TypeUnknown
 					}
 					src.Fields[cleanName] = f
 				}
@@ -405,6 +408,9 @@ func (t *Translator) translateSource(decl *SourceDeclaration) (ir.SourceDef, err
 							return ir.SourceDef{}, err
 						}
 						f.Expr = expr
+						f.Type = inferTypeFromExpr(expr)
+					} else {
+						f.Type = ir.TypeUnknown
 					}
 					src.Fields[cleanName] = f
 				}
@@ -454,6 +460,7 @@ func (t *Translator) translateJoin(src *ir.SourceDef, astJoin *Join, kind ir.Fie
 	f := ir.FieldDef{
 		Kind:       kind,
 		Name:       cleanJoinName,
+		Type:       ir.TypeUnknown,
 		JoinSource: &joinSrc,
 	}
 	if astJoin.Expr != nil {
@@ -601,6 +608,20 @@ func (t *Translator) translatePrimary(p *Primary) (ir.Expr, error) {
 		return ir.CallExpr{Name: p.Call.Name, Args: args}, nil
 	}
 	return nil, fmt.Errorf("empty primary expression")
+}
+
+// inferTypeFromExpr attempts to determine the DataType from an expression.
+// CastExpr yields its target type, Literal yields its value type,
+// and all other expressions default to TypeUnknown.
+func inferTypeFromExpr(expr ir.Expr) ir.DataType {
+	switch e := expr.(type) {
+	case ir.CastExpr:
+		return e.Type
+	case ir.Literal:
+		return e.Type
+	default:
+		return ir.TypeUnknown
+	}
 }
 
 func stripBackticks(s string) string {
