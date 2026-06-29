@@ -992,3 +992,97 @@ func TestEngineE2ETypeCast(t *testing.T) {
 		t.Logf("Query ran successfully, but returned 0 rows.")
 	}
 }
+
+func TestEngineE2ERawSQLSource(t *testing.T) {
+	dbURL := os.Getenv("MALLOW_POSTGRES_URL")
+	if dbURL == "" {
+		t.Skip("MALLOW_POSTGRES_URL not set, skipping e2e raw sql source test")
+	}
+	db, err := sql.Open("postgres", dbURL)
+	if err != nil {
+		t.Fatalf("failed to connect to db: %v", err)
+	}
+	defer db.Close()
+
+	if err := db.Ping(); err != nil {
+		t.Skipf("skipping e2e raw sql source test, database not available: %v", err)
+	}
+
+	engine := mallow.New(&compiler.PostgresDialect{}, db)
+
+	// A bodyless sql() source relies on schema introspection over the subquery.
+	sourceText := `
+		source: cust is sql('SELECT customer_id, name, region FROM datamart.customers')
+
+		query: raw_project is cust -> {
+			project: customer_id, name
+			limit: 5
+		}
+
+		query: raw_grouped is cust -> {
+			group_by: region
+			aggregate: cnt is count()
+		}
+	`
+	session := engine.FromString(sourceText)
+
+	t.Run("Project over sql() source", func(t *testing.T) {
+		sqlStr, err := session.GetSQL("raw_project")
+		if err != nil {
+			t.Fatalf("failed to compile raw_project: %v", err)
+		}
+		t.Logf("Raw SQL Project SQL: %s", sqlStr)
+
+		rows, err := session.Run(context.Background(), "raw_project")
+		if err != nil {
+			t.Fatalf("failed to run raw_project: %v", err)
+		}
+		defer rows.Close()
+
+		var count int
+		for rows.Next() {
+			var id int
+			var name sql.NullString
+			if err := rows.Scan(&id, &name); err != nil {
+				t.Fatalf("failed to scan row: %v", err)
+			}
+			count++
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatalf("rows iteration error: %v", err)
+		}
+		if count == 0 {
+			t.Errorf("expected rows from sql() source, got 0")
+		}
+	})
+
+	t.Run("Group by over sql() source", func(t *testing.T) {
+		sqlStr, err := session.GetSQL("raw_grouped")
+		if err != nil {
+			t.Fatalf("failed to compile raw_grouped: %v", err)
+		}
+		t.Logf("Raw SQL Grouped SQL: %s", sqlStr)
+
+		rows, err := session.Run(context.Background(), "raw_grouped")
+		if err != nil {
+			t.Fatalf("failed to run raw_grouped: %v", err)
+		}
+		defer rows.Close()
+
+		var count int
+		for rows.Next() {
+			var region sql.NullString
+			var cnt int
+			if err := rows.Scan(&region, &cnt); err != nil {
+				t.Fatalf("failed to scan row: %v", err)
+			}
+			count++
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatalf("rows iteration error: %v", err)
+		}
+		if count == 0 {
+			t.Errorf("expected grouped rows from sql() source, got 0")
+		}
+	})
+}

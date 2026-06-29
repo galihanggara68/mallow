@@ -75,6 +75,7 @@ func (g *GlobalFieldSpace) GetSource(name string) (ir.SourceDef, bool) {
 
 type SchemaIntrospector interface {
 	GetSchema(db *sql.DB, tableName string) (map[string]ir.DataType, error)
+	GetSchemaFromSQL(db *sql.DB, sql string) (map[string]ir.DataType, error)
 }
 
 // Translator converts AST to IR.
@@ -361,6 +362,8 @@ func (t *Translator) translateSource(decl *SourceDeclaration) (ir.SourceDef, err
 
 	if decl.Def.Table != nil {
 		src.PrimarySource.TablePath = *decl.Def.Table
+	} else if decl.Def.SQL != nil {
+		src.PrimarySource.SQL = *decl.Def.SQL
 	} else if decl.Def.Ref != nil {
 		cleanRef := stripBackticks(*decl.Def.Ref)
 		parentSrc, ok := t.global.GetSource(cleanRef)
@@ -433,10 +436,22 @@ func (t *Translator) translateSource(decl *SourceDeclaration) (ir.SourceDef, err
 	}
 
 	// If fields are omitted, dynamically inject ir.FieldDef based on the database schema.
-	if (decl.Body == nil || len(src.Fields) == 0) && decl.Def.Table != nil && t.db != nil && t.dialect != nil {
-		schema, err := t.dialect.GetSchema(t.db, *decl.Def.Table)
-		if err != nil {
-			return ir.SourceDef{}, fmt.Errorf("schema introspection failed for table %s: %w", *decl.Def.Table, err)
+	if (decl.Body == nil || len(src.Fields) == 0) && t.db != nil && t.dialect != nil {
+		var schema map[string]ir.DataType
+		var err error
+		switch {
+		case decl.Def.Table != nil:
+			schema, err = t.dialect.GetSchema(t.db, *decl.Def.Table)
+			if err != nil {
+				return ir.SourceDef{}, fmt.Errorf("schema introspection failed for table %s: %w", *decl.Def.Table, err)
+			}
+		case decl.Def.SQL != nil:
+			schema, err = t.dialect.GetSchemaFromSQL(t.db, *decl.Def.SQL)
+			if err != nil {
+				return ir.SourceDef{}, fmt.Errorf("schema introspection failed for sql source: %w", err)
+			}
+		default:
+			// Ref-only source with no fields and no DB schema to introspect.
 		}
 		for colName, colType := range schema {
 			src.Fields[colName] = ir.FieldDef{

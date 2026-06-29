@@ -15,6 +15,7 @@ type Dialect interface {
 	JSONArrayAgg(expr string) string
 	JSONObject(pairs []string) string // pairs: "key", "value", "key", "value"...
 	GetSchema(db *sql.DB, tableName string) (map[string]ir.DataType, error)
+	GetSchemaFromSQL(db *sql.DB, sql string) (map[string]ir.DataType, error)
 	TypeCast(expr string, castType ir.DataType) string
 }
 
@@ -576,6 +577,30 @@ func (d *DuckDBDialect) GetSchema(db *sql.DB, tableName string) (map[string]ir.D
 	return schemaMap, nil
 }
 
+func (d *DuckDBDialect) GetSchemaFromSQL(db *sql.DB, sqlStr string) (map[string]ir.DataType, error) {
+	return schemaFromSQL(db, sqlStr, duckdbTypeToMallowType)
+}
+
+// schemaFromSQL introspects the columns of an arbitrary SQL subquery by running
+// `SELECT * FROM (<sql>) AS _sub LIMIT 0` and mapping each column's database
+// type via the supplied mapper. Shared by all dialects.
+func schemaFromSQL(db *sql.DB, sqlStr string, mapType func(string) ir.DataType) (map[string]ir.DataType, error) {
+	rows, err := db.Query(fmt.Sprintf("SELECT * FROM (%s) AS _sub LIMIT 0", sqlStr))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	colTypes, err := rows.ColumnTypes()
+	if err != nil {
+		return nil, err
+	}
+	schemaMap := make(map[string]ir.DataType)
+	for _, col := range colTypes {
+		schemaMap[col.Name()] = mapType(col.DatabaseTypeName())
+	}
+	return schemaMap, nil
+}
+
 func duckdbTypeToMallowType(dbType string) ir.DataType {
 	dbType = strings.ToLower(dbType)
 	switch {
@@ -661,6 +686,10 @@ func (d *PostgresDialect) GetSchema(db *sql.DB, tableName string) (map[string]ir
 		schemaMap[colName] = postgresTypeToMallowType(dataType)
 	}
 	return schemaMap, nil
+}
+
+func (d *PostgresDialect) GetSchemaFromSQL(db *sql.DB, sqlStr string) (map[string]ir.DataType, error) {
+	return schemaFromSQL(db, sqlStr, postgresTypeToMallowType)
 }
 
 func postgresTypeToMallowType(pgType string) ir.DataType {

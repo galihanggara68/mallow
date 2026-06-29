@@ -7,7 +7,7 @@ import (
 
 var (
 	mallowLexer = lexer.MustSimple([]lexer.SimpleRule{
-		{Name: "Keyword", Pattern: `\b(source|query|run|is|table|dimension|measure|join_one|join_many|on|project|aggregate|group_by|nest|not|where|order_by|limit|cast|as|number|string|boolean|timestampz|timestamp|date)\b`},
+		{Name: "Keyword", Pattern: `\b(source|query|run|is|table|sql|dimension|measure|join_one|join_many|on|project|aggregate|group_by|nest|not|where|order_by|limit|cast|as|number|string|boolean|timestampz|timestamp|date)\b`},
 		{Name: "Ident", Pattern: "[a-zA-Z_][a-zA-Z0-9_]*|`[^`]*`"},
 		{Name: "String", Pattern: `'[^']*'|"[^"]*"`},
 		{Name: "Number", Pattern: `\d+(\.\d+)?`},
@@ -45,6 +45,7 @@ type SourceDeclaration struct {
 
 type SourceDef struct {
 	Table *string `parser:"'table' '(' @String ')'"`
+	SQL   *string `parser:"| 'sql' '(' @String ')'"`
 	Ref   *string `parser:"| @Ident"`
 }
 
